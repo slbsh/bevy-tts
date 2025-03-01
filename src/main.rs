@@ -1,5 +1,7 @@
-use bevy::{input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, prelude::*};
+use bevy::{input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, picking::mesh_picking::ray_cast::RayMeshHit, prelude::*, render::{mesh::MeshAabb, primitives::Aabb}};
 use bevy_rapier3d::prelude::*;
+
+pub const MOUSE_RAY_TOI : f32 = 1000.;
 
 fn main() {
 	App::new()
@@ -15,8 +17,16 @@ fn main() {
 		.run();
 }
 
+#[derive(Component)]
+#[require(Camera)]
+pub struct MainCamera;
+
+/// Marker Component for Entities that can have objects place ontop of themm (used in mouse raycas)
+#[derive(Component)]
+pub struct PlacablePlatform;
+
 fn camera_movement(
-	mut query: Query<&mut Transform, With<Camera>>,
+	mut query: Query<&mut Transform, With<MainCamera>>,
 	keys:   Res<ButtonInput<KeyCode>>,
 	mouse:  Res<ButtonInput<MouseButton>>,
 	motion: Res<AccumulatedMouseMotion>,
@@ -61,10 +71,11 @@ fn setup(
 		MeshMaterial3d(materials.add(Color::srgb(0.7, 0.7, 0.8))),
 		RigidBody::Fixed,
 		ColliderDebugColor(Hsla::BLACK),
+		PlacablePlatform
 	));
 
 	// cubes
-	let num = 8;
+	let num = 1;
 	let rad = 1.0;
 
 	let shift = rad * 2.0 + rad;
@@ -83,7 +94,7 @@ fn setup(
 
 	let cube_mesh = meshes.add(Cuboid::new(rad*2.0, rad*2.0, rad*2.0));
 
-	for j in 0usize..20 {
+	for j in 0usize..1 {
 		for i in 0..num {
 			for k in 0usize..num {
 				let x = i as f32 * shift - centerx + offset;
@@ -97,11 +108,11 @@ fn setup(
 						child.spawn((
 							Mesh3d(cube_mesh.clone()),
 							MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
-							Collider::cuboid(rad, rad, rad),
+							// Collider::cuboid(rad, rad, rad),
 							Transform::from_xyz(x, y, z),
-							RigidBody::Dynamic,
-							ColliderDebugColor(colors[color % 3]),
-							RapierPickable,
+							// RigidBody::Dynamic,
+							// ColliderDebugColor(colors[color % 3]),
+							// RapierPickable,
 						))
 						.observe(cursor_drag);
 					});
@@ -122,16 +133,34 @@ fn setup(
 	));
 
 	// camera
-	commands.spawn((Camera3d::default(), Transform::from_xyz(0.0, 30.0, 0.0)));
+	commands.spawn((Camera3d::default(), MainCamera, Transform::from_xyz(0.0, 30.0, 0.0)));
 }
 
 fn cursor_drag(
 	drag: Trigger<Pointer<Drag>>, 
+	mut mesh_cast_param: MeshRayCast,
 	mut transforms: Query<&mut Transform>,
+	q_mesh: Query<&Mesh3d>,
+	q_cam: Query<&Camera, With<MainCamera>>,
+	q_gt: Query<&GlobalTransform, With<MainCamera>>,
+	q_has_placable: Query<(), With<PlacablePlatform>>,
+	r_mesh: Res<Assets<Mesh>>,
 ) {
-	if let Ok(mut transform) = transforms.get_mut(drag.entity()) {
-		// move the cube around
-		transform.translation.x -= drag.delta.x;
-		transform.translation.y -= drag.delta.y;
-	}
+	let cam = q_cam.single();
+	let cam_global_t = q_gt.single();
+	let Ok(ray3d) = cam.viewport_to_world(cam_global_t, drag.pointer_location.position) else {return};
+
+	// TODO: Use `ColisionGroups`
+	let Some((_, RayMeshHit { point, normal, .. })) = mesh_cast_param.cast_ray(ray3d, &RayCastSettings { visibility: RayCastVisibility::VisibleInView, filter: &|e| q_has_placable.contains(e), ..default() }).first() else {return};
+
+	let &Transform {rotation, scale, ..} = transforms.get(drag.entity()).unwrap();
+
+	let mut transform = transforms.get_mut(drag.entity()).unwrap();
+	let Mesh3d(mesh_h) = q_mesh.get(drag.entity()).unwrap();
+	let mesh = r_mesh.get(mesh_h).unwrap();
+
+	// TODO: In general, likely needs to use Aabb center.
+	let Aabb {half_extents, ..} = mesh.compute_aabb().unwrap();
+
+	*transform = Transform {translation: *point + half_extents.y * normal, rotation: Quat::from_axis_angle(*normal, rotation.to_axis_angle().1), scale};
 }
