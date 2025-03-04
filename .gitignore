@@ -2,7 +2,5 @@ debug/
 target/
 **/*.rs.bk
 *.pdb
-flake.nix
-flake.lock
 
 .direnv/
