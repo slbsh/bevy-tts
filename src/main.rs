@@ -1,4 +1,4 @@
-use bevy::{input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, picking::mesh_picking::ray_cast::RayMeshHit, prelude::*, render::{mesh::MeshAabb, primitives::Aabb}};
+use bevy::{input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll}, log::LogPlugin, picking::mesh_picking::ray_cast::RayMeshHit, prelude::*, render::{mesh::MeshAabb, primitives::Aabb}};
 use bevy_rapier3d::prelude::*;
 
 pub const MOUSE_RAY_TOI : f32 = 1000.;
@@ -6,12 +6,22 @@ pub const MOUSE_RAY_TOI : f32 = 1000.;
 fn main() {
 	App::new()
 		.add_plugins((
-			DefaultPlugins,
+			// Cabbage man needs this LogPlugin to filter gpu errors.
+			DefaultPlugins.set(LogPlugin {
+				filter: "wgpu_hal=off".into(),
+				level: bevy::log::Level::INFO,
+				custom_layer: |_app| None,
+			}),
+			MeshPickingPlugin,
 			RapierPickingPlugin,
 			RapierPhysicsPlugin::<NoUserData>::default(),
 			RapierDebugRenderPlugin::default(),
 		))
 		.insert_resource(ClearColor(Color::srgb(0.97, 0.97, 1.0)))
+		.insert_resource(MeshPickingSettings {
+			require_markers: true,
+			ray_cast_visibility: RayCastVisibility::Visible
+		})
 		.add_systems(Startup, setup)
 		.add_systems(Update, camera_movement)
 		.run();
@@ -74,6 +84,17 @@ fn setup(
 		PlacablePlatform
 	));
 
+	// Table
+	commands.spawn((
+		Mesh3d(meshes.add(Cuboid::new(20.0, 0.2, 20.0))),
+		Transform::from_translation(10. * Vec3::Y),
+		Collider::cuboid(10.0, 0.1, 10.0),
+		MeshMaterial3d(materials.add(Color::srgb(0.7, 0.3, 0.3))),
+		RigidBody::Fixed,
+		ColliderDebugColor(Hsla::BLACK),
+		PlacablePlatform
+	));
+
 	// cubes
 	let num = 1;
 	let rad = 1.0;
@@ -103,19 +124,18 @@ fn setup(
 				color += 1;
 
 				commands
-					.spawn((Transform::from_rotation(Quat::from_rotation_x(0.2)), Visibility::default()))
-					.with_children(|child| {
-						child.spawn((
-							Mesh3d(cube_mesh.clone()),
-							MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
-							// Collider::cuboid(rad, rad, rad),
-							Transform::from_xyz(x, y, z),
-							// RigidBody::Dynamic,
-							// ColliderDebugColor(colors[color % 3]),
-							// RapierPickable,
-						))
-						.observe(cursor_drag);
-					});
+					.spawn((
+						Transform { translation: Vec3 {x, y, z}, rotation: Quat::from_rotation_x(0.2), ..default() },
+						Visibility::default(),
+						Mesh3d(cube_mesh.clone()),
+						MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
+						RayCastPickable,
+						// Collider::cuboid(rad, rad, rad),
+						// RigidBody::Dynamic,
+						// ColliderDebugColor(colors[color % 3]),
+						// RapierPickable,
+					))
+					.observe(cursor_drag);
 			}
 		}
 
@@ -133,7 +153,7 @@ fn setup(
 	));
 
 	// camera
-	commands.spawn((Camera3d::default(), MainCamera, Transform::from_xyz(0.0, 30.0, 0.0)));
+	commands.spawn((Camera3d::default(), MainCamera, Transform::from_xyz(0.0, 30.0, 0.0), RayCastPickable));
 }
 
 fn cursor_drag(
