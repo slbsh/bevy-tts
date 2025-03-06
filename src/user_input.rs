@@ -1,3 +1,7 @@
+// TODO:
+// No support for multi-selection. Current Implementation is fairly imcompatible
+// with multi-selection.
+
 use bevy::color::palettes::css::RED;
 use bevy::ecs::system::SystemParam;
 use bevy::picking::mesh_picking::ray_cast::RayMeshHit;
@@ -9,6 +13,7 @@ use bevy::render::mesh::MeshAabb;
 use bevy::render::primitives::Aabb;
 use bevy::utils::hashbrown::HashSet;
 use bevy_rapier3d::dynamics::{RigidBody, RigidBodyDisabled};
+use bevy_rapier3d::prelude::ExternalImpulse;
 
 use crate::camera::MainCamera;
 
@@ -51,6 +56,12 @@ pub struct InputState {
 }
 
 #[derive(Clone, Copy)]
+pub enum FlickPlane {
+	XZPlane,
+	ViewportPlane,
+}
+
+#[derive(Clone, Copy)]
 pub enum InputModeState {
 	Dragging {
 		/// Height above surface dragged onto.
@@ -58,12 +69,13 @@ pub enum InputModeState {
 	},
 	Flicking {
 		impulse_scale: f32,
+		flick_plane: FlickPlane,
 	},
 }
 
 impl Default for InputModeState {
 	fn default() -> Self {
-		Self::Flicking { impulse_scale: 1. }
+		Self::Flicking { impulse_scale: 20., flick_plane: FlickPlane::XZPlane }
 		// Self::Dragging { drag_height: 1. }
 	}
 }
@@ -84,7 +96,7 @@ pub const MOUSE_RAY_TOI: f32 = 1000.;
 pub fn plugin(app: &mut App) {
 	app.init_resource::<InputConfig>()
 		.init_resource::<InputState>()
-		.add_systems(Update, (cursor_drag, update_input_state));
+		.add_systems(Update, (cursor_drag, update_input_state, draw_flick_gizmo));
 }
 
 fn cursor_drag(
@@ -139,7 +151,6 @@ fn cursor_drag(
 // FIXME: Monster function
 fn update_input_state(
 	mut cmd: Commands,
-	mut gizmos: Gizmos,
 	mut e_pointer_input: EventReader<PointerInput>,
 	mut world_mesh: WorldMeshPointerParams,
 	mut r_input_state: ResMut<InputState>,
@@ -153,60 +164,69 @@ fn update_input_state(
 			direction: PressDirection::Down,
 			button: PointerButton::Primary,
 		} => {
-			match &*r_input_state {
-				InputState { mode_state: InputModeState::Flicking { .. }, .. } => {
-					let Some(&(entity, RayMeshHit { point, .. })) = world_mesh
-						.get_pointer_hits(&RayCastSettings {
-							visibility: RayCastVisibility::VisibleInView,
-							..default()
-						})
-						.iter()
-						.filter(|&&(entity, _)| raycast_pickables.contains(entity))
-						.next()
-					else {
-						return;
-					};
+			let Some(&(entity, RayMeshHit { point, .. })) = world_mesh
+				.get_pointer_hits(&RayCastSettings {
+					visibility: RayCastVisibility::VisibleInView,
+					..default()
+				})
+				.iter()
+				.filter(|&&(entity, _)| raycast_pickables.contains(entity))
+				.next()
+			else {
+				return;
+			};
 
-					let global_translation = global_transforms.get(entity).unwrap().translation();
+			let global_translation = global_transforms.get(entity).unwrap().translation();
 
-					r_input_state.focused = vec![PointerFocusedObject {
-						pointer_offset: global_translation - point,
-						entity,
-					}]
-				},
-				InputState { mode_state: InputModeState::Dragging { .. }, .. } => {
-					let Some(&(entity, RayMeshHit { point, .. })) = world_mesh
-						.get_pointer_hits(&RayCastSettings {
-							visibility: RayCastVisibility::VisibleInView,
-							..default()
-						})
-						.iter()
-						.filter(|&&(entity, _)| raycast_pickables.contains(entity))
-						.next()
-					else {
-						return;
-					};
-
-					let global_translation = global_transforms.get(entity).unwrap().translation();
-
-					if let Ok(rb) = rigid_bodies.get(entity) {
-						cmd.entity(entity).insert(PreviousRigidBody(rb.clone()));
-						cmd.entity(entity).insert(RigidBody::Fixed);
-						// cmd.entity(entity).remove::<RigidBody>();
-					}
-
-					r_input_state.focused = vec![PointerFocusedObject {
-						pointer_offset: global_translation - point,
-						entity,
-					}]
-				},
+			if let (Ok(rb), InputState { mode_state: InputModeState::Dragging { .. }, .. }) =
+				(rigid_bodies.get(entity), &*r_input_state)
+			{
+				cmd.entity(entity).insert(PreviousRigidBody(rb.clone()));
+				cmd.entity(entity).insert(RigidBody::Fixed);
+				// NOTE:
+				// This seems to cause bugs with Rapier.
+				// cmd.entity(entity).remove::<RigidBody>();
 			}
+
+			r_input_state.focused =
+				vec![PointerFocusedObject { pointer_offset: point - global_translation, entity }]
 		},
 		PointerAction::Pressed {
 			direction: PressDirection::Up,
 			button: PointerButton::Primary,
 		} => match &*r_input_state {
-			InputState { mode_state: InputModeState::Flicking { .. }, .. } => {
+			InputState {
+				mode_state: InputModeState::Flicking { flick_plane, impulse_scale },
+				..
+			} => {
+				let Some(point_pos) =
+					world_mesh.pointers.single().location.as_ref().map(|x| x.position)
+				else {
+					return;
+				};
+				let Some(&PointerFocusedObject { entity, pointer_offset }) =
+					r_input_state.focused.first()
+				else {
+					return;
+				};
+
+				let f_transl = global_transforms.get(entity).unwrap().translation();
+
+				let Some(flick_vector) = get_flick_vector(
+					*flick_plane,
+					point_pos,
+					f_transl + pointer_offset,
+					world_mesh.main_camera.single(),
+				) else {
+					return;
+				};
+
+				cmd.entity(entity).insert(ExternalImpulse::at_point(
+					impulse_scale * flick_vector,
+					f_transl + pointer_offset,
+					f_transl,
+				));
+
 				r_input_state.focused = vec![];
 			},
 			InputState { mode_state: InputModeState::Dragging { .. }, .. } => {
@@ -222,38 +242,56 @@ fn update_input_state(
 				r_input_state.focused = vec![];
 			},
 		},
-		PointerAction::Moved { .. } => match &*r_input_state {
-			// FIXME:
-			// In future when you can flick a group of selected objects,
-			// this will need to change
-			InputState { mode_state: InputModeState::Flicking { .. }, .. } => {
-				let Some(point_pos) = &world_mesh.pointers.single().location else { return };
-				let Some(&PointerFocusedObject { entity, .. }) = r_input_state.focused.first()
-				else {
-					return;
-				};
-
-				let (main_camera, cam_transform) = world_mesh.main_camera.single();
-				let focused_transform = global_transforms.get(entity).unwrap();
-				let f_transl @ Vec3 { x: f_transl_x, y: f_transl_y, z: f_transl_z } =
-					focused_transform.translation();
-
-				let Ok(vp_ray3d) = main_camera.viewport_to_world(cam_transform, point_pos.position)
-				else {
-					return;
-				};
-
-				// TODO:
-				// Also try a plane that's parallel to the viewport (simply `vp_ray3d.direction`)
-				let distance = vp_ray3d
-					.intersect_plane(f_transl_y * Vec3::Y, InfinitePlane3d { normal: Dir3::Y })
-					.unwrap();
-
-				let intersection_point = vp_ray3d.origin + distance * vp_ray3d.direction;
-				gizmos.arrow(intersection_point, f_transl, RED);
-			},
-			_ => {},
-		},
 		_ => {},
 	});
+}
+
+fn draw_flick_gizmo(
+	mut gizmos: Gizmos,
+	world_mesh: WorldMeshPointerParams,
+	global_transforms: Query<&GlobalTransform, Without<MainCamera>>,
+	r_input_state: Res<InputState>,
+) {
+	// FIXME:
+	// In future when you can flick a group of selected objects,
+	// this will need to change
+	let InputState { mode_state: InputModeState::Flicking { flick_plane, .. }, focused } =
+		&*r_input_state
+	else {
+		return;
+	};
+	let Some(point_pos) = world_mesh.pointers.single().location.as_ref().map(|x| x.position) else {
+		return;
+	};
+	let Some(&PointerFocusedObject { entity, pointer_offset }) = focused.first() else {
+		return;
+	};
+
+	let f_transl = global_transforms.get(entity).unwrap().translation() + pointer_offset;
+
+	let Some(flick_vector) =
+		get_flick_vector(*flick_plane, point_pos, f_transl, world_mesh.main_camera.single())
+	else {
+		return;
+	};
+
+	gizmos.arrow(f_transl - flick_vector, f_transl, RED);
+}
+
+fn get_flick_vector(
+	flick_plane: FlickPlane,
+	pointer_position: Vec2,
+	focus_point: Vec3,
+	(main_camera, cam_transform): (&Camera, &GlobalTransform),
+) -> Option<Vec3> {
+	let vp_ray3d = main_camera.viewport_to_world(cam_transform, pointer_position).ok()?;
+
+	let inf_plane = match flick_plane {
+		FlickPlane::ViewportPlane => InfinitePlane3d { normal: -vp_ray3d.direction },
+		FlickPlane::XZPlane => InfinitePlane3d { normal: Dir3::Y },
+	};
+
+	let distance = vp_ray3d.intersect_plane(focus_point, inf_plane)?;
+
+	Some(focus_point - (vp_ray3d.origin + distance * vp_ray3d.direction))
 }
