@@ -42,26 +42,27 @@ impl<'w, 's> WorldMeshPointerParams<'w, 's> {
 	}
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Reflect, Clone, Copy, Debug)]
 pub struct PointerFocusedObject {
 	pub pointer_offset: Vec3,
 	pub entity: Entity,
 }
 
-#[derive(Resource, Default)]
+#[derive(Reflect, Resource, Default)]
+#[reflect(Resource, Default)]
 pub struct InputState {
 	/// Objects under influence by user input.
 	pub focused: Vec<PointerFocusedObject>,
 	pub mode_state: InputModeState,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Reflect, Clone, Copy)]
 pub enum FlickPlane {
 	XZPlane,
 	ViewportPlane,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Reflect, Clone, Copy)]
 pub enum InputModeState {
 	Dragging {
 		/// Height above surface dragged onto.
@@ -75,7 +76,7 @@ pub enum InputModeState {
 
 impl Default for InputModeState {
 	fn default() -> Self {
-		Self::Flicking { impulse_scale: 20., flick_plane: FlickPlane::XZPlane }
+		Self::Flicking { impulse_scale: 20., flick_plane: FlickPlane::ViewportPlane }
 		// Self::Dragging { drag_height: 1. }
 	}
 }

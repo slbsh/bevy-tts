@@ -1,6 +1,7 @@
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
+use bevy_inspector_egui::quick::{ResourceInspectorPlugin, WorldInspectorPlugin};
 
 pub mod camera;
 pub mod game;
@@ -19,8 +20,9 @@ fn main() {
 			RapierPickingPlugin,
 			RapierPhysicsPlugin::<NoUserData>::default().in_schedule(FixedPostUpdate),
 			RapierDebugRenderPlugin::default(),
-			bevy_inspector_egui::quick::WorldInspectorPlugin::default(),
-			bevy_inspector_egui::quick::ResourceInspectorPlugin::<MeshPickingSettings>::default(),
+			WorldInspectorPlugin::default(),
+			ResourceInspectorPlugin::<MeshPickingSettings>::default(),
+			ResourceInspectorPlugin::<user_input::InputState>::default(),
 			user_input::plugin,
 			camera::plugin,
 			game::plugin,

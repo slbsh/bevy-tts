@@ -66,7 +66,7 @@ fn setup(
 
 	let mut offset = -(num as f32) * (rad * 2.0 + rad) * 0.5;
 
-	let cube_mesh = meshes.add(Cuboid::new(rad * 2.0, rad * 2.0, rad * 2.0));
+	let cube_mesh = meshes.add(Sphere::new(rad));
 
 	for i in 0..num {
 		for k in 0usize..num {
@@ -81,7 +81,7 @@ fn setup(
 				MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
 				RayCastPickable,
 				PlacablePlatform,
-				Collider::cuboid(rad, rad, rad),
+				Collider::ball(rad),
 				RigidBody::Dynamic,
 				// ColliderDebugColor(colors[color % 3]),
 				// RapierPickable,
