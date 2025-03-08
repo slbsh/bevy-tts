@@ -8,6 +8,7 @@ use bevy_rapier3d::prelude::*;
 
 pub mod camera;
 pub mod game;
+pub mod util;
 pub mod user_input;
 
 fn main() {
