@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 #[cfg(feature = "dev")]

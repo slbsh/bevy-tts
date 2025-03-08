@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::MeshAabb;
 use bevy::render::primitives::Aabb;
 use bevy::utils::hashbrown::HashSet;
-use bevy_rapier3d::dynamics::{RigidBody, RigidBodyDisabled};
+use bevy_rapier3d::dynamics::RigidBody;
 use bevy_rapier3d::prelude::ExternalImpulse;
 
 use crate::camera::MainCamera;
@@ -127,7 +127,7 @@ fn cursor_drag(
 		.first()
 		else { return };
 
-	r_input_state.focused.iter().for_each(|&PointerFocusedObject { entity, pointer_offset }| {
+	r_input_state.focused.iter().for_each(|&PointerFocusedObject { entity, .. }| {
 		let &Transform { rotation, scale, .. } = transforms.get(entity).unwrap();
 
 		let mut transform = transforms.get_mut(entity).unwrap();
@@ -168,8 +168,7 @@ fn update_input_state(
 					..default()
 				})
 				.iter()
-				.filter(|&&(entity, _)| raycast_pickables.contains(entity))
-				.next()
+				.find(|&&(entity, _)| raycast_pickables.contains(entity))
 				else { return };
 
 			let global_translation = global_transforms.get(entity).unwrap().translation();
@@ -177,7 +176,7 @@ fn update_input_state(
 			if let (Ok(rb), InputState { mode_state: InputModeState::Dragging { .. }, .. }) =
 				(rigid_bodies.get(entity), &*r_input_state)
 			{
-				cmd.entity(entity).insert(PreviousRigidBody(rb.clone()));
+				cmd.entity(entity).insert(PreviousRigidBody(*rb));
 				cmd.entity(entity).insert(RigidBody::Fixed);
 				// NOTE:
 				// This seems to cause bugs with Rapier.
@@ -225,7 +224,7 @@ fn update_input_state(
 				r_input_state.focused.iter().for_each(
 					|&PointerFocusedObject { entity, .. }| {
 						if let Ok(PreviousRigidBody(rb)) = previous_rigid_bodies.get(entity) {
-							cmd.entity(entity).insert(rb.clone());
+							cmd.entity(entity).insert(*rb);
 							cmd.entity(entity).remove::<PreviousRigidBody>();
 						}
 					},
