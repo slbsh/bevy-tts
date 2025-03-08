@@ -28,5 +28,5 @@ overflow_delimited_expr = true
 remove_nested_parens = true
 reorder_impl_items = true
 group_imports = "StdExternalCrate"
-trailing_semicolon = true
+trailing_semicolon = false
 where_single_line = true

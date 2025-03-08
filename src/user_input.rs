@@ -5,9 +5,8 @@
 use bevy::color::palettes::css::RED;
 use bevy::ecs::system::SystemParam;
 use bevy::picking::mesh_picking::ray_cast::RayMeshHit;
-use bevy::picking::pointer::{
-	Location, PointerAction, PointerInput, PointerLocation, PressDirection,
-};
+use bevy::picking::pointer::{Location, PointerAction, PointerInput, PointerLocation,
+                             PressDirection};
 use bevy::prelude::*;
 use bevy::render::mesh::MeshAabb;
 use bevy::render::primitives::Aabb;
@@ -23,8 +22,8 @@ pub struct InputConfig {}
 #[derive(SystemParam)]
 pub struct WorldMeshPointerParams<'w, 's> {
 	pub mesh_raycast: MeshRayCast<'w, 's>,
-	pub main_camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
-	pub pointers: Query<'w, 's, &'static PointerLocation>,
+	pub main_camera:  Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
+	pub pointers:     Query<'w, 's, &'static PointerLocation>,
 }
 
 impl<'w, 's> WorldMeshPointerParams<'w, 's> {
@@ -33,10 +32,11 @@ impl<'w, 's> WorldMeshPointerParams<'w, 's> {
 			self;
 
 		let (cam, cam_global_t) = main_camera.single();
-		let Some(Location { position, .. }) = pointers.single().location else { return &[] };
-		let Ok(ray3d) = cam.viewport_to_world(cam_global_t, position) else {
-			return &[];
-		};
+		let Some(Location { position, .. }) = pointers.single().location
+			else { return &[] };
+
+		let Ok(ray3d) = cam.viewport_to_world(cam_global_t, position)
+			else { return &[] };
 
 		mesh_raycast.cast_ray(ray3d, rc_settings)
 	}
@@ -45,14 +45,14 @@ impl<'w, 's> WorldMeshPointerParams<'w, 's> {
 #[derive(Reflect, Clone, Copy, Debug)]
 pub struct PointerFocusedObject {
 	pub pointer_offset: Vec3,
-	pub entity: Entity,
+	pub entity:         Entity,
 }
 
 #[derive(Reflect, Resource, Default)]
 #[reflect(Resource, Default)]
 pub struct InputState {
 	/// Objects under influence by user input.
-	pub focused: Vec<PointerFocusedObject>,
+	pub focused:    Vec<PointerFocusedObject>,
 	pub mode_state: InputModeState,
 }
 
@@ -70,7 +70,7 @@ pub enum InputModeState {
 	},
 	Flicking {
 		impulse_scale: f32,
-		flick_plane: FlickPlane,
+		flick_plane:   FlickPlane,
 	},
 }
 
@@ -109,12 +109,11 @@ fn cursor_drag(
 	q_placeable: Query<(), With<PlacablePlatform>>,
 ) {
 	if r_input_state.focused.is_empty() {
-		return;
+		return
 	};
 
-	let InputModeState::Dragging { drag_height } = r_input_state.mode_state else {
-		return;
-	};
+	let InputModeState::Dragging { drag_height } = r_input_state.mode_state
+		else { return };
 
 	let ents: HashSet<Entity> =
 		r_input_state.focused.iter().map(|&PointerFocusedObject { entity, .. }| entity).collect();
@@ -126,9 +125,7 @@ fn cursor_drag(
 			..default()
 		})
 		.first()
-	else {
-		return;
-	};
+		else { return };
 
 	r_input_state.focused.iter().for_each(|&PointerFocusedObject { entity, pointer_offset }| {
 		let &Transform { rotation, scale, .. } = transforms.get(entity).unwrap();
@@ -173,9 +170,7 @@ fn update_input_state(
 				.iter()
 				.filter(|&&(entity, _)| raycast_pickables.contains(entity))
 				.next()
-			else {
-				return;
-			};
+				else { return };
 
 			let global_translation = global_transforms.get(entity).unwrap().translation();
 
@@ -202,14 +197,11 @@ fn update_input_state(
 			} => {
 				let Some(point_pos) =
 					world_mesh.pointers.single().location.as_ref().map(|x| x.position)
-				else {
-					return;
-				};
+					else { return };
+				
 				let Some(&PointerFocusedObject { entity, pointer_offset }) =
 					r_input_state.focused.first()
-				else {
-					return;
-				};
+					else { return };
 
 				let f_transl = global_transforms.get(entity).unwrap().translation();
 
@@ -218,9 +210,8 @@ fn update_input_state(
 					point_pos,
 					f_transl + pointer_offset,
 					world_mesh.main_camera.single(),
-				) else {
-					return;
-				};
+				)
+					else { return };
 
 				cmd.entity(entity).insert(ExternalImpulse::at_point(
 					impulse_scale * flick_vector,
@@ -258,23 +249,17 @@ fn draw_flick_gizmo(
 	// this will need to change
 	let InputState { mode_state: InputModeState::Flicking { flick_plane, .. }, focused } =
 		&*r_input_state
-	else {
-		return;
-	};
-	let Some(point_pos) = world_mesh.pointers.single().location.as_ref().map(|x| x.position) else {
-		return;
-	};
-	let Some(&PointerFocusedObject { entity, pointer_offset }) = focused.first() else {
-		return;
-	};
+		else { return };
+	let Some(point_pos) = world_mesh.pointers.single().location.as_ref().map(|x| x.position)
+		else { return };
+	let Some(&PointerFocusedObject { entity, pointer_offset }) = focused.first()
+		else { return };
 
 	let f_transl = global_transforms.get(entity).unwrap().translation() + pointer_offset;
 
 	let Some(flick_vector) =
 		get_flick_vector(*flick_plane, point_pos, f_transl, world_mesh.main_camera.single())
-	else {
-		return;
-	};
+		else { return };
 
 	gizmos.arrow(f_transl - flick_vector, f_transl, RED);
 }

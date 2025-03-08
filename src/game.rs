@@ -6,22 +6,6 @@ use crate::user_input::PlacablePlatform;
 pub fn plugin(app: &mut App) {
 	app.add_systems(Startup, setup);
 }
-// commands
-// 	.spawn((
-// 		Transform {
-// 			translation: Vec3 { x, y, z },
-// 			rotation: Quat::from_rotation_x(0.2),
-// 			..default()
-// 		},
-// 		Visibility::default(),
-// 		Mesh3d(cube_mesh.clone()),
-// 		MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
-// 		RayCastPickable,
-// 		Collider::cuboid(rad, rad, rad),
-// 		RigidBody::Dynamic,
-// 		// ColliderDebugColor(colors[color % 3]),
-// 		// RapierPickable,
-// 	));
 
 fn setup(
 	mut commands: Commands,
@@ -83,7 +67,6 @@ fn setup(
 				PlacablePlatform,
 				Collider::ball(rad),
 				RigidBody::Dynamic,
-				// ColliderDebugColor(colors[color % 3]),
 				// RapierPickable,
 			));
 		}
