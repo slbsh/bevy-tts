@@ -2,20 +2,26 @@
 // No support for multi-selection. Current Implementation is fairly imcompatible
 // with multi-selection.
 
+use core::f32;
+
 use bevy::color::palettes::css::{RED, YELLOW};
 use bevy::ecs::system::SystemParam;
-use bevy::math::bounding::{Aabb3d, AabbCast3d};
+use bevy::math::Affine3A;
+use bevy::math::bounding::{Aabb2d, Aabb3d, AabbCast3d};
 use bevy::picking::mesh_picking::ray_cast::RayMeshHit;
-use bevy::picking::pointer::{Location, PointerAction, PointerInput, PointerLocation,
-                             PressDirection};
+use bevy::picking::pointer::{
+	Location, PointerAction, PointerInput, PointerLocation, PressDirection,
+};
 use bevy::prelude::*;
+use bevy::render::camera::{CameraProjection, SubCameraView};
 use bevy::render::mesh::MeshAabb;
-use bevy::render::primitives::Aabb;
+use bevy::render::primitives::{Aabb, Frustum};
 use bevy::utils::hashbrown::HashSet;
 use bevy_rapier3d::dynamics::RigidBody;
 use bevy_rapier3d::prelude::ExternalImpulse;
 
 use crate::camera::MainCamera;
+use crate::util::aabb_from_points;
 
 pub const MAX_SELECTION_DISTANCE: f32 = 1000.;
 
@@ -34,8 +40,8 @@ impl Default for InputConfig {
 #[derive(SystemParam)]
 pub struct WorldMeshPointerParams<'w, 's> {
 	pub mesh_raycast: MeshRayCast<'w, 's>,
-	pub main_camera:  Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
-	pub pointers:     Query<'w, 's, &'static PointerLocation>,
+	pub main_camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<MainCamera>>,
+	pub pointers: Query<'w, 's, &'static PointerLocation>,
 }
 
 impl<'w, 's> WorldMeshPointerParams<'w, 's> {
@@ -44,11 +50,9 @@ impl<'w, 's> WorldMeshPointerParams<'w, 's> {
 			self;
 
 		let (cam, cam_global_t) = main_camera.single();
-		let Some(Location { position, .. }) = pointers.single().location
-			else { return &[] };
+		let Some(Location { position, .. }) = pointers.single().location else { return &[] };
 
-		let Ok(ray3d) = cam.viewport_to_world(cam_global_t, position)
-			else { return &[] };
+		let Ok(ray3d) = cam.viewport_to_world(cam_global_t, position) else { return &[] };
 
 		mesh_raycast.cast_ray(ray3d, rc_settings)
 	}
@@ -57,14 +61,14 @@ impl<'w, 's> WorldMeshPointerParams<'w, 's> {
 #[derive(Reflect, Clone, Copy, Debug)]
 pub struct PointerFocusedObject {
 	pub pointer_offset: Vec3,
-	pub entity:         Entity,
+	pub entity: Entity,
 }
 
 #[derive(Reflect, Resource, Default)]
 #[reflect(Resource, Default)]
 pub struct InputState {
 	/// Objects under influence by user input.
-	pub focused:    Vec<PointerFocusedObject>,
+	pub focused: Vec<PointerFocusedObject>,
 	pub mode_state: InputModeState,
 }
 
@@ -133,7 +137,9 @@ fn cursor_drag(
 			..default()
 		})
 		.first()
-		else { return };
+	else {
+		return;
+	};
 
 	focused.iter().for_each(|&PointerFocusedObject { entity, pointer_offset }| {
 		let &Transform { rotation, scale, .. } = transforms.get(entity).unwrap();
@@ -231,11 +237,15 @@ fn update_input_state(
 			} => {
 				let Some(point_pos) =
 					world_mesh.pointers.single().location.as_ref().map(|x| x.position)
-					else { return };
-				
+				else {
+					return;
+				};
+
 				let Some(&PointerFocusedObject { entity, pointer_offset }) =
 					r_input_state.focused.first()
-					else { return };
+				else {
+					return;
+				};
 
 				let f_transl = global_transforms.get(entity).unwrap().translation();
 
@@ -244,8 +254,9 @@ fn update_input_state(
 					point_pos,
 					f_transl + pointer_offset,
 					world_mesh.main_camera.single(),
-				)
-					else { return };
+				) else {
+					return;
+				};
 
 				cmd.entity(entity).insert(ExternalImpulse::at_point(
 					impulse_scale * flick_vector,
@@ -297,57 +308,116 @@ fn draw_flick_gizmo(
 	// this will need to change
 	let InputState { mode_state: InputModeState::Flick { flick_plane, .. }, focused } =
 		&*r_input_state
-		else { return };
-	let Some(point_pos) = world_mesh.pointers.single().location.as_ref().map(|x| x.position)
-		else { return };
-	let Some(&PointerFocusedObject { entity, pointer_offset }) = focused.first()
-		else { return };
+	else {
+		return;
+	};
+	let Some(point_pos) = world_mesh.pointers.single().location.as_ref().map(|x| x.position) else {
+		return;
+	};
+	let Some(&PointerFocusedObject { entity, pointer_offset }) = focused.first() else { return };
 
 	let f_transl = global_transforms.get(entity).unwrap().translation() + pointer_offset;
 
 	let Some(flick_vector) =
 		get_flick_vector(*flick_plane, point_pos, f_transl, world_mesh.main_camera.single())
-		else { return };
+	else {
+		return;
+	};
 
 	gizmos.arrow(f_transl - flick_vector, f_transl, RED);
 }
 
+#[derive(Component)]
+struct SelectionBoxBoi;
+
 fn select_region(
+	mut cmd: Commands,
 	mut r_input_state: ResMut<InputState>,
+	mut select_box_boi: Option<Single<(Entity, &mut Node), With<SelectionBoxBoi>>>,
 	pointers: Query<&PointerLocation>,
 	visible_objects: Query<
 		(Entity, &GlobalTransform, &Aabb, &InheritedVisibility),
 		(With<RayCastPickable>, Without<MainCamera>),
 	>,
-	main_camera: Query<(&GlobalTransform, &Camera), With<MainCamera>>,
+	main_camera: Query<(&GlobalTransform, &Camera, &Projection), With<MainCamera>>,
 ) {
 	let (InputModeState::Select { initial_position: Some(initial_position) }, Some(point_pos)) =
 		(r_input_state.mode_state, pointers.single().location.as_ref().map(|x| x.position))
 	else {
+		if let Some((boyo, _)) = select_box_boi.map(|x| x.into_inner()) {
+			cmd.entity(boyo).despawn();
+		}
 		return;
 	};
 
-	let (cam_transform, camera) = main_camera.single();
+	let Aabb2d { min: min @ Vec2 { x: a_x, y: a_y }, max: Vec2 { x: b_x, y: b_y } } =
+		aabb_from_points(initial_position, point_pos);
 
-	let selection_box_center = (point_pos + initial_position) / 2.;
+	// Guard when the area of the box is zero.
+	if (b_x - a_x) * (b_y - a_x) == 0. {
+		if let Some((boyo, _)) = select_box_boi.map(|x| x.into_inner()) {
+			cmd.entity(boyo).despawn();
+		}
+		return;
+	};
 
-	let aabb_cast = AabbCast3d::from_ray(
-		Aabb3d::new(Vec3::ZERO, (0.5 * (point_pos - initial_position)).abs().extend(1.)),
-		Ray3d { origin: cam_transform.translation() + selection_box_center.x * cam_transform.right() + selection_box_center.y * cam_transform.up(), direction: cam_transform.forward() },
-		MAX_SELECTION_DISTANCE,
-	);
+	let selection_box_size = UVec2 { x: (b_x - a_x) as u32, y: (b_y - a_y) as u32 };
 
+	if let Some((_, mut node)) = select_box_boi.map(|x| x.into_inner()) {
+		let UVec2 { x, y } = selection_box_size;
+
+		*node = Node {
+			top: Val::Px(a_y),
+			left: Val::Px(a_x),
+			width: Val::Px(x as f32),
+			height: Val::Px(y as f32),
+			..node.clone()
+		}
+	} else {
+		let UVec2 { x, y } = selection_box_size;
+		cmd.spawn((
+			Node {
+				top: Val::Px(a_y),
+				left: Val::Px(a_x),
+				width: Val::Px(x as f32),
+				height: Val::Px(y as f32),
+				position_type: PositionType::Absolute,
+				..default()
+			},
+			BackgroundColor(Color::srgba(0.5, 0.8, 1., 0.7)),
+			SelectionBoxBoi,
+		));
+	}
+
+	let (cam_transform, camera, projection) = main_camera.single();
+
+	let target_size = camera.physical_viewport_size().unwrap();
+
+	let sub_cam = projection.get_clip_from_view_for_sub(&SubCameraView {
+		full_size: target_size,
+		offset: min,
+		size: selection_box_size,
+	});
+
+	let sub_frustum = Frustum::from_clip_from_world(&sub_cam);
+
+	// TODO:
+	// Compute that the overlapping AABB is above some threshold, rather than
+	// simply checking if it intersects or not.
 	r_input_state.focused = visible_objects
 		.iter()
 		.filter_map(|(entity, global_transform, aabb, &visibility)| {
 			if visibility == InheritedVisibility::VISIBLE
-				&& aabb_cast
-					.aabb_collision_at(Aabb3d::new(
-						global_transform.translation(),
-						aabb.half_extents,
-					))
-					.is_some()
-			{
+				&& sub_frustum.intersects_obb(
+					aabb,
+					&Affine3A::from_mat4(
+						cam_transform.compute_matrix().inverse()
+							* global_transform.compute_matrix(),
+					),
+					// FIXME: Should it be true of false ?
+					true,
+					true,
+				) {
 				Some(PointerFocusedObject { pointer_offset: Vec3::ZERO, entity })
 			} else {
 				None

@@ -12,6 +12,7 @@ bevy_egui = "^0.32"
 # log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
 
 [features]
+default = ["dev"]
 dev = ["bevy-inspector-egui", "bevy/dynamic_linking"]
 
 [profile.dev]
