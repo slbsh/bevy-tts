@@ -21,7 +21,7 @@ use bevy_rapier3d::dynamics::RigidBody;
 use bevy_rapier3d::prelude::ExternalImpulse;
 
 use crate::camera::MainCamera;
-use crate::util::aabb_from_points;
+use crate::util::{aabb_from_points, contains_obb};
 
 pub const MAX_SELECTION_DISTANCE: f32 = 1000.;
 
@@ -87,7 +87,7 @@ pub enum InputModeState {
 
 impl Default for InputModeState {
 	fn default() -> Self {
-		// Self::Flick { impulse_scale: 20., flick_plane: FlickPlane::ViewportPlane }
+		// Self::Flick { impulse_scale: 20., flick_plane: FlickPlane::XZPlane }
 		Self::Select { initial_position: None }
 	}
 }
@@ -215,7 +215,7 @@ fn update_input_state(
 
 			r_input_state
 				.focused
-				.push(PointerFocusedObject { pointer_offset: point - global_translation, entity });
+				= vec![PointerFocusedObject { pointer_offset: point - global_translation, entity }]
 		},
 		PointerAction::Pressed {
 			direction: PressDirection::Down,
@@ -263,7 +263,11 @@ fn update_input_state(
 					f_transl + pointer_offset,
 					f_transl,
 				));
-			},
+
+				r_input_state
+					.focused
+					= vec![];
+				},
 			InputState { mode_state: InputModeState::Grab { .. }, .. } => {
 				r_input_state.focused.iter().for_each(
 					|&PointerFocusedObject { entity, .. }| {
@@ -408,7 +412,8 @@ fn select_region(
 		.iter()
 		.filter_map(|(entity, global_transform, aabb, &visibility)| {
 			if visibility == InheritedVisibility::VISIBLE
-				&& sub_frustum.intersects_obb(
+				&& contains_obb(
+					&sub_frustum,
 					aabb,
 					&Affine3A::from_mat4(
 						cam_transform.compute_matrix().inverse()
