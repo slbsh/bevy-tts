@@ -11,6 +11,7 @@ fn setup(
 	mut commands: Commands,
 	mut meshes: ResMut<Assets<Mesh>>,
 	mut materials: ResMut<Assets<StandardMaterial>>,
+	asset_server: Res<AssetServer>,
 ) {
 	// Ground
 	commands.spawn((
@@ -39,38 +40,49 @@ fn setup(
 		Transform::default().looking_at(Vec3::new(-1.0, -2.5, -1.5), Vec3::Y),
 	));
 
-	// cubes
-	let num = 3;
-	let rad = 1.0;
+	// let num = 3;
+	// let rad = 1.0;
+	//
+	// let shift = rad * 2.0 + rad;
+	// let centerx = shift * (num / 2) as f32;
+	// let centery = shift / 2.0;
+	// let centerz = shift * (num / 2) as f32;
+	//
+	// let mut offset = -(num as f32) * (rad * 2.0 + rad) * 0.5;
+	//
+	// let cube_mesh = meshes.add(Sphere::new(rad));
+	//
+	// for i in 0..num {
+	// 	for k in 0usize..num {
+	// 		let x = i as f32 * shift - centerx + offset;
+	// 		let y = shift + centery + 3.0;
+	// 		let z = k as f32 * shift - centerz + offset;
+	//
+	// 		commands.spawn((
+	// 			Transform { translation: Vec3 { x, y, z }, ..default() },
+	// 			Visibility::default(),
+	// 			Mesh3d(cube_mesh.clone()),
+	// 			MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
+	// 			RayCastPickable,
+	// 			PlacablePlatform,
+	// 			Collider::ball(rad),
+	// 			RigidBody::Dynamic,
+	// 			// RapierPickable,
+	// 		));
+	// 	}
+	//
+	// 	offset -= 0.05 * rad * (num as f32 - 1.0);
+	// }
 
-	let shift = rad * 2.0 + rad;
-	let centerx = shift * (num / 2) as f32;
-	let centery = shift / 2.0;
-	let centerz = shift * (num / 2) as f32;
-
-	let mut offset = -(num as f32) * (rad * 2.0 + rad) * 0.5;
-
-	let cube_mesh = meshes.add(Sphere::new(rad));
-
-	for i in 0..num {
-		for k in 0usize..num {
-			let x = i as f32 * shift - centerx + offset;
-			let y = shift + centery + 3.0;
-			let z = k as f32 * shift - centerz + offset;
-
-			commands.spawn((
-				Transform { translation: Vec3 { x, y, z }, ..default() },
-				Visibility::default(),
-				Mesh3d(cube_mesh.clone()),
-				MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
-				RayCastPickable,
-				PlacablePlatform,
-				Collider::ball(rad),
-				RigidBody::Dynamic,
-				// RapierPickable,
-			));
-		}
-
-		offset -= 0.05 * rad * (num as f32 - 1.0);
-	}
+	std::env::args().skip(1).for_each(|path| {
+		commands.spawn((
+			Mesh3d(asset_server.load(path)),
+			// TODO: generate collider from mesh 🥺👉👈
+			Visibility::default(),
+			RayCastPickable,
+			PlacablePlatform,
+			RigidBody::Dynamic,
+			MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
+		));
+	})
 }
