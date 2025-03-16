@@ -1,0 +1,12 @@
+# Blender 4.3.2 MTL File: 'd6.blend'
+# www.blender.org
+newmtl Material
+Ns 250.000000 # specular higlights
+Ka 1.000000 1.000000 1.000000 # ambient colour
+# Kd 1.000000 1.000000 1.000000 # diffuse colour
+Ks 0.500000 0.500000 0.500000 # specular colour
+Ni 1.450000 # optical density
+d 1.000000 # dissolve (alpha?)
+illum 2 # illumination model
+map_Kd d6.png # diffuse texture
+map_Bump d6_normal.png # normal map

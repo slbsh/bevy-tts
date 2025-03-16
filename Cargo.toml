@@ -9,6 +9,7 @@ bevy = { version = "0.15", default-features = true, features = ["webgpu", "bevy_
 bevy-inspector-egui =  { version = "0.29", optional = true }
 bevy_rapier3d = "0.29"
 bevy_egui = "^0.32"
+tobj = "4.0"
 # log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
 
 [features]

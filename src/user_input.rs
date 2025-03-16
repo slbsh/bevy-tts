@@ -46,15 +46,12 @@ pub struct WorldMeshPointerParams<'w, 's> {
 
 impl<'w, 's> WorldMeshPointerParams<'w, 's> {
 	pub fn get_pointer_hits(&mut self, rc_settings: &RayCastSettings) -> &[(Entity, RayMeshHit)] {
-		let &mut WorldMeshPointerParams { ref mut mesh_raycast, ref main_camera, ref pointers } =
-			self;
-
-		let (cam, cam_global_t) = main_camera.single();
-		let Some(Location { position, .. }) = pointers.single().location else { return &[] };
+		let (cam, cam_global_t) = self.main_camera.single();
+		let Some(Location { position, .. }) = self.pointers.single().location else { return &[] };
 
 		let Ok(ray3d) = cam.viewport_to_world(cam_global_t, position) else { return &[] };
 
-		mesh_raycast.cast_ray(ray3d, rc_settings)
+		self.mesh_raycast.cast_ray(ray3d, rc_settings)
 	}
 }
 
@@ -72,13 +69,16 @@ pub struct InputState {
 	pub mode_state: InputModeState,
 }
 
-#[derive(Reflect, Clone, Copy)]
+#[derive(Reflect, Default, Clone, Copy)]
+#[reflect(Default)]
 pub enum FlickPlane {
+	#[default]
 	XZPlane,
 	ViewportPlane,
 }
 
 #[derive(Reflect, Clone, Copy)]
+#[reflect(Default)]
 pub enum InputModeState {
 	Grab,
 	Select { initial_position: Option<Vec2> },
@@ -87,8 +87,8 @@ pub enum InputModeState {
 
 impl Default for InputModeState {
 	fn default() -> Self {
-		// Self::Flick { impulse_scale: 20., flick_plane: FlickPlane::XZPlane }
-		Self::Select { initial_position: None }
+		 Self::Flick { impulse_scale: 20., flick_plane: Default::default() }
+		//Self::Select { initial_position: None }
 	}
 }
 
@@ -127,8 +127,7 @@ fn cursor_drag(
 		return;
 	};
 
-	let ents: HashSet<Entity> =
-		focused.iter().map(|&PointerFocusedObject { entity, .. }| entity).collect();
+	let ents: HashSet<Entity> = focused.iter().map(|&p| p.entity).collect();
 
 	let Some(&(_, RayMeshHit { point, normal, .. })) = world_mesh
 		.get_pointer_hits(&RayCastSettings {
