@@ -4,7 +4,35 @@ use bevy_rapier3d::prelude::*;
 use crate::user_input::PlacablePlatform;
 
 pub fn plugin(app: &mut App) {
-	app.add_systems(Startup, setup);
+	app.add_systems(Startup, setup)
+		.add_systems(Update,  thing);
+}
+
+fn thing(
+	mut commands: Commands,
+	mut e: EventReader<AssetEvent<crate::obj::Obj>>,
+	objs: Res<Assets<crate::obj::Obj>>,
+	mut meshes: ResMut<Assets<Mesh>>,
+	mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+	e.read().for_each(|e|
+		if let AssetEvent::LoadedWithDependencies { id, .. } = e {
+			let obj = objs.get(*id).unwrap();
+
+			commands.spawn((
+				Mesh3d(meshes.add(obj.mesh.clone())),
+				// TODO: generate collider from mesh 🥺👉👈
+				Visibility::default(),
+				RayCastPickable,
+				PlacablePlatform,
+				RigidBody::Dynamic,
+				if let Some(material) = &obj.material {
+					MeshMaterial3d(material.clone())
+				} else {
+					MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9)))
+				},
+			));
+		});
 }
 
 fn setup(
@@ -74,15 +102,6 @@ fn setup(
 	// 	offset -= 0.05 * rad * (num as f32 - 1.0);
 	// }
 
-	std::env::args().skip(1).for_each(|path| {
-		commands.spawn((
-			Mesh3d(asset_server.load(path)),
-			// TODO: generate collider from mesh 🥺👉👈
-			Visibility::default(),
-			RayCastPickable,
-			PlacablePlatform,
-			RigidBody::Dynamic,
-			MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
-		));
-	})
+	// lol :L
+	std::mem::forget(asset_server.load::<crate::obj::Obj>("d6.obj"));
 }

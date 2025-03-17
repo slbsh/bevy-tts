@@ -1,6 +1,5 @@
 # Blender 4.3.2 MTL File: 'd6.blend'
 # www.blender.org
-
 newmtl Material
 Ns 250.000000
 Ka 1.000000 1.000000 1.000000
@@ -9,4 +8,5 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd C:/Users/Willi/Computer/blunders/d6/albedo.png
+map_Kd d6.png
+map_Bump d6_normal.png
