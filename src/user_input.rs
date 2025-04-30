@@ -1,6 +1,12 @@
 // TODO:
-// No support for multi-selection. Current Implementation is fairly imcompatible
-// with multi-selection.
+// Multi-dragging needs the following things done :
+//	- All bodies selected become `Static`
+//	- Maybe move group of objects relative to
+//	  the object clicked & dragged ?
+//	- pointer_offset from click_drag isn't very nice
+//	  on single object selections (because the offset point is
+//	  set to the distance from the center of the object to the
+//	  point on the surface that the pointer hit)
 
 use core::f32;
 
@@ -29,11 +35,17 @@ pub const MAX_SELECTION_DISTANCE: f32 = 1000.;
 pub struct InputConfig {
 	/// Height above surface dragged onto.
 	drag_height: f32,
+	drag_spread: f32,
 }
+
+// TODO:
+// Change to a HashMap for PointerIds. Assumes 1 poitner.
+#[derive(Resource, Default, Deref)]
+pub struct LastPointerLocation(pub PointerLocation);
 
 impl Default for InputConfig {
 	fn default() -> Self {
-		Self { drag_height: 1. }
+		Self { drag_height: 1., drag_spread: 2. }
 	}
 }
 
@@ -78,6 +90,16 @@ pub enum FlickPlane {
 	ViewportPlane,
 }
 
+impl FlickPlane {
+	pub fn to_infinite_plane(&self, vp_ray3d: Ray3d) -> InfinitePlane3d {
+		match self {
+			FlickPlane::ViewportPlane => InfinitePlane3d { normal: -vp_ray3d.direction },
+			FlickPlane::XZPlane => InfinitePlane3d { normal: Dir3::Y },
+		}
+	}
+}
+
+
 #[derive(Reflect, Clone, Copy)]
 pub enum InputModeState {
 	Grab,
@@ -96,7 +118,7 @@ impl Default for InputModeState {
 #[derive(Component)]
 pub struct PlacablePlatform;
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct PreviousRigidBody(pub RigidBody);
 
 /// Marker Component for Entities that can't be moved with user input
@@ -106,10 +128,18 @@ pub struct Locked;
 pub const MOUSE_RAY_TOI: f32 = 1000.;
 
 pub fn plugin(app: &mut App) {
-	app.init_resource::<InputConfig>().init_resource::<InputState>().add_systems(
-		Update,
-		(cursor_drag, update_input_state, draw_flick_gizmo, select_region, draw_selected_gizmo),
-	);
+	app.init_resource::<InputConfig>().init_resource::<InputState>()
+		.init_resource::<LastPointerLocation>()
+		.add_systems(
+			Update,
+			(cursor_drag, update_input_state, draw_flick_gizmo, select_region, draw_selected_gizmo),
+	).add_systems(PostUpdate, last_pointer_update);
+}
+
+fn last_pointer_update(mut r: ResMut<LastPointerLocation>, q: Query<&PointerLocation>,) {
+	if let Ok(p) = q.get_single() {
+		r.0 = p.clone();
+	}
 }
 
 fn cursor_drag(
@@ -121,8 +151,8 @@ fn cursor_drag(
 	r_mesh: Res<Assets<Mesh>>,
 	q_placeable: Query<(), With<PlacablePlatform>>,
 ) {
-	let (drag_height, focused @ [_, ..], InputModeState::Grab) =
-		(r_input_config.drag_height, &r_input_state.focused[..], r_input_state.mode_state)
+	let (InputConfig { drag_height, drag_spread }, focused @ [_, ..], InputModeState::Grab) =
+		(&*r_input_config, &r_input_state.focused[..], r_input_state.mode_state)
 	else {
 		return;
 	};
@@ -141,6 +171,8 @@ fn cursor_drag(
 		return;
 	};
 
+	let max_offset : f32 = focused.iter().fold(0., |a, pfo| a.max(pfo.pointer_offset.length()));
+
 	focused.iter().for_each(|&PointerFocusedObject { entity, pointer_offset }| {
 		let &Transform { rotation, scale, .. } = transforms.get(entity).unwrap();
 
@@ -152,8 +184,7 @@ fn cursor_drag(
 		let Aabb { half_extents, .. } = mesh.compute_aabb().unwrap();
 
 		*transform = Transform {
-			translation: point + (half_extents.y + drag_height) * normal,
-			// + (pointer_offset - pointer_offset.dot(normal) * normal),
+			translation: point + (Vec3::from(half_extents).dot(normal.abs()) + drag_height) * normal + drag_spread * pointer_offset / max_offset,
 			rotation: Quat::from_axis_angle(normal, rotation.to_axis_angle().1),
 			scale,
 		};
@@ -166,6 +197,7 @@ fn update_input_state(
 	mut e_pointer_input: EventReader<PointerInput>,
 	mut world_mesh: WorldMeshPointerParams,
 	mut r_input_state: ResMut<InputState>,
+	r_last_pointer_position: Res<LastPointerLocation>,
 	rigid_bodies: Query<&RigidBody>,
 	raycast_pickables: Query<&RayCastPickable>,
 	previous_rigid_bodies: Query<&PreviousRigidBody>,
@@ -197,7 +229,10 @@ fn update_input_state(
 
 			let global_translation = global_transforms.get(entity).unwrap().translation();
 
-			if let (Ok(rb), InputModeState::Select { .. }) =
+			// FIXME:
+			// Currently only checks if Dynamic, which means Kinematic bodies will lose their Kinematic
+			// body type.
+			if let (Ok(rb@RigidBody::Dynamic), InputModeState::Select { .. }) =
 				(rigid_bodies.get(entity), r_input_state.mode_state)
 			{
 				cmd.entity(entity).insert(PreviousRigidBody(*rb));
@@ -213,9 +248,10 @@ fn update_input_state(
 				r_input_state.mode_state = InputModeState::Grab;
 			}
 
-			r_input_state
-				.focused
-				= vec![PointerFocusedObject { pointer_offset: point - global_translation, entity }]
+			if !r_input_state.focused.iter().find(|pfo| pfo.entity == entity).is_some() {
+				r_input_state.focused =
+					vec![PointerFocusedObject { pointer_offset: point - global_translation, entity }]
+			}
 		},
 		PointerAction::Pressed {
 			direction: PressDirection::Down,
@@ -229,54 +265,72 @@ fn update_input_state(
 			direction: PressDirection::Up,
 			button: PointerButton::Primary,
 		} => match &*r_input_state {
-			InputState { mode_state: InputModeState::Select { .. }, .. } => {
+			InputState { mode_state: InputModeState::Select { .. }, focused } => {
+				focused.iter().for_each(|&PointerFocusedObject {entity, ..}| {
+					// FIXME:
+					// Currently only checks if Dynamic, which means Kinematic bodies will lose their Kinematic
+					// body type.
+					if let (Ok(rb@RigidBody::Dynamic), InputModeState::Select { .. }) =
+						(rigid_bodies.get(entity), r_input_state.mode_state)
+					{
+						cmd.entity(entity).insert(PreviousRigidBody(*rb));
+						cmd.entity(entity).insert(RigidBody::Fixed);
+						// NOTE:
+						// This seems to cause bugs with Rapier.
+						// cmd.entity(entity).remove::<RigidBody>();
+					}
+				});
+
 				r_input_state.mode_state = InputModeState::Select { initial_position: None };
 			},
 			InputState {
 				mode_state: InputModeState::Flick { flick_plane, impulse_scale }, ..
 			} => {
-				let Some(point_pos) =
-					world_mesh.pointers.single().location.as_ref().map(|x| x.position)
-				else {
-					return;
-				};
+				// NOTE:
+				// I know you love it, Anthony
+				if let Some((entity, f_transl, pointer_offset, flick_vector)) = world_mesh.pointers.single().location.as_ref().and_then(|&Location { position, .. }| {
+					let &PointerFocusedObject { entity, pointer_offset } = r_input_state.focused.first()?;
+					let f_transl = global_transforms.get(entity).map(|gt| gt.translation()).ok()?;
+					let flick_vector = world_mesh.main_camera.get_single().ok()
+						.and_then(|(main_camera, cam_transform)| main_camera.viewport_to_world(cam_transform, position).ok())
+						.and_then(|vp_ray3d| get_flick_vector(*flick_plane, vp_ray3d, f_transl))?;
 
-				let Some(&PointerFocusedObject { entity, pointer_offset }) =
-					r_input_state.focused.first()
-				else {
-					return;
-				};
+					Some((entity, f_transl, pointer_offset, flick_vector))
+				}) {
+					cmd.entity(entity).insert(ExternalImpulse::at_point(
+						impulse_scale * flick_vector,
+						f_transl + pointer_offset,
+						f_transl,
+					));
 
-				let f_transl = global_transforms.get(entity).unwrap().translation();
-
-				let Some(flick_vector) = get_flick_vector(
-					*flick_plane,
-					point_pos,
-					f_transl + pointer_offset,
-					world_mesh.main_camera.single(),
-				) else {
-					return;
-				};
-
-				cmd.entity(entity).insert(ExternalImpulse::at_point(
-					impulse_scale * flick_vector,
-					f_transl + pointer_offset,
-					f_transl,
-				));
-
-				r_input_state
-					.focused
-					= vec![];
-				},
+					r_input_state.focused = vec![];
+				}
+			},
 			InputState { mode_state: InputModeState::Grab { .. }, .. } => {
 				r_input_state.focused.iter().for_each(
 					|&PointerFocusedObject { entity, .. }| {
 						if let Ok(PreviousRigidBody(rb)) = previous_rigid_bodies.get(entity) {
 							cmd.entity(entity).insert(*rb);
 							cmd.entity(entity).remove::<PreviousRigidBody>();
+						};
+						if let Some(flick_vector) = world_mesh.pointers.get_single().ok().and_then(|p| {
+							let pointer_position = p.location.as_ref().map(|x| x.position)?.reflect(Vec2::Y);
+							let lpp = r_last_pointer_position.location.as_ref().map(|x| x.position)?.reflect(Vec2::Y);
+							let (_, &m_cam_transform) = world_mesh.main_camera.get_single().ok()?;
+
+							let delta_p = pointer_position - lpp;
+
+							Some(m_cam_transform.affine().transform_vector3(Vec3 {x: delta_p.x, y: 0., z: - delta_p.y}))
+						}) {
+							cmd.entity(entity).insert(ExternalImpulse {
+								impulse: 10. * flick_vector,..Default::default()
+							}
+							);
 						}
 					},
 				);
+
+				r_input_state.focused = vec![];
 
 				r_input_state.mode_state = InputModeState::Select { initial_position: None };
 			},
@@ -322,8 +376,9 @@ fn draw_flick_gizmo(
 
 	let f_transl = global_transforms.get(entity).unwrap().translation() + pointer_offset;
 
-	let Some(flick_vector) =
-		get_flick_vector(*flick_plane, point_pos, f_transl, world_mesh.main_camera.single())
+	let Some(flick_vector) = world_mesh.main_camera.get_single().ok()
+		.and_then(|(main_camera, cam_transform)| main_camera.viewport_to_world(cam_transform, point_pos).ok())
+		.and_then(|vp_ray3d| get_flick_vector(*flick_plane, vp_ray3d, f_transl))
 	else {
 		return;
 	};
@@ -337,7 +392,7 @@ struct SelectionBoxBoi;
 fn select_region(
 	mut cmd: Commands,
 	mut r_input_state: ResMut<InputState>,
-	mut select_box_boi: Option<Single<(Entity, &mut Node), With<SelectionBoxBoi>>>,
+	select_box_boi: Option<Single<(Entity, &mut Node), With<SelectionBoxBoi>>>,
 	pointers: Query<&PointerLocation>,
 	visible_objects: Query<
 		(Entity, &GlobalTransform, &Aabb, &InheritedVisibility),
@@ -405,10 +460,7 @@ fn select_region(
 
 	let sub_frustum = Frustum::from_clip_from_world(&sub_cam);
 
-	// TODO:
-	// Compute that the overlapping AABB is above some threshold, rather than
-	// simply checking if it intersects or not.
-	r_input_state.focused = visible_objects
+	let selected_objs : Vec<(Vec3, Entity)> = visible_objects
 		.iter()
 		.filter_map(|(entity, global_transform, aabb, &visibility)| {
 			if visibility == InheritedVisibility::VISIBLE
@@ -419,32 +471,33 @@ fn select_region(
 						cam_transform.compute_matrix().inverse()
 							* global_transform.compute_matrix(),
 					),
-					// FIXME: Should it be true of false ?
+					// FIXME: Should it be true or false ?
 					true,
 					true,
 				) {
-				Some(PointerFocusedObject { pointer_offset: Vec3::ZERO, entity })
+				Some(( global_transform.translation(), entity ))
 			} else {
 				None
 			}
 		})
 		.collect();
+
+	let center_point = selected_objs.iter().fold(Vec3::ZERO, |a, &(vb, _)| a + vb) / (selected_objs.len() as f32);
+
+	r_input_state.focused = selected_objs.iter().map(|&(pos, entity)| PointerFocusedObject {
+		pointer_offset: pos - center_point,
+		entity
+	}).collect()
 }
 
 fn get_flick_vector(
 	flick_plane: FlickPlane,
-	pointer_position: Vec2,
+	vp_ray3d@Ray3d { origin, direction }: Ray3d,
 	focus_point: Vec3,
-	(main_camera, cam_transform): (&Camera, &GlobalTransform),
 ) -> Option<Vec3> {
-	let vp_ray3d = main_camera.viewport_to_world(cam_transform, pointer_position).ok()?;
-
-	let inf_plane = match flick_plane {
-		FlickPlane::ViewportPlane => InfinitePlane3d { normal: -vp_ray3d.direction },
-		FlickPlane::XZPlane => InfinitePlane3d { normal: Dir3::Y },
-	};
+	let inf_plane = flick_plane.to_infinite_plane(vp_ray3d);
 
 	let distance = vp_ray3d.intersect_plane(focus_point, inf_plane)?;
 
-	Some(focus_point - (vp_ray3d.origin + distance * vp_ray3d.direction))
+	Some(focus_point - (origin + distance * direction))
 }
