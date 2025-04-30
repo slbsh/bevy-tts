@@ -26,11 +26,10 @@ fn thing(
 				RayCastPickable,
 				PlacablePlatform,
 				RigidBody::Dynamic,
-				if let Some(material) = &obj.material {
-					MeshMaterial3d(material.clone())
-				} else {
-					MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9)))
-				},
+				obj.material.as_ref().map_or_else(
+					||  MeshMaterial3d(materials.add(Color::srgb(0.2, 0.7, 0.9))),
+					|m| MeshMaterial3d(m.clone()),
+				),
 			));
 		});
 }
